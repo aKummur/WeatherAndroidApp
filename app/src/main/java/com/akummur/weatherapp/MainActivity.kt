@@ -5,6 +5,7 @@ import android.os.AsyncTask
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
 import android.util.Log
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.IOException
 import java.io.InputStreamReader
@@ -79,6 +80,9 @@ class MainActivity : AppCompatActivity() {
             super.onPostExecute(result)
             cancelProgressDailog()
             Log.i("JSON response", result!!)
+
+            val jsonObject = JSONObject(result)
+            val a = jsonObject.optString("a")
         }
 
         private fun showProgressDailog() {
