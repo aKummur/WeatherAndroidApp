@@ -1,117 +1,117 @@
 package com.akummur.weatherapp
 
+import android.annotation.SuppressLint
+import android.app.AlertDialog
 import android.app.Dialog
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
+import android.location.Location
+import android.location.LocationManager
+import android.net.Uri
 import android.os.AsyncTask
 import androidx.appcompat.app.AppCompatActivity
 import android.os.Bundle
+import android.os.Looper
+import android.provider.Settings
 import android.util.Log
-import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.DataOutputStream
-import java.io.IOException
-import java.io.InputStreamReader
-import java.lang.StringBuilder
-import java.net.HttpURLConnection
-import java.net.SocketTimeoutException
-import java.net.URL
+import android.widget.Toast
+import com.google.android.gms.location.*
+import com.google.gson.Gson
+import com.karumi.dexter.Dexter
+import com.karumi.dexter.MultiplePermissionsReport
+import com.karumi.dexter.PermissionToken
+import com.karumi.dexter.listener.PermissionRequest
+import com.karumi.dexter.listener.multi.MultiplePermissionsListener
 
 class MainActivity : AppCompatActivity() {
+    private lateinit var mFusedLocationProviderClient: FusedLocationProviderClient
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        CallAPILoginAsynctask("ak","2345").execute()
-    }
+        mFusedLocationProviderClient = LocationServices.getFusedLocationProviderClient(this)
 
-    private inner class CallAPILoginAsynctask(val user: String, val password: String) :
-        AsyncTask<Any, Void, String>() {
-        private  lateinit var customProgressDialog: Dialog
+        if (!isLocationEnabled()) {
+            Toast.makeText(this, "Your location is turned off. Please turn it on",
+            Toast.LENGTH_SHORT).show()
 
-        override fun onPreExecute() {
-            super.onPreExecute()
-            showProgressDailog()
-        }
-
-        override fun doInBackground(vararg params: Any?): String {
-            var result: String
-            var connection: HttpURLConnection? = null
-
-            try{
-                var url = URL("https://run.mocky.io/v3/9bb81bc6-5078-4068-bc36-dccc694d025a")
-                connection = url.openConnection() as HttpURLConnection
-                connection.doInput = true // get data
-                connection.doOutput = true // send data
-
-                connection.instanceFollowRedirects = false
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("content-type", "application/json")
-                connection.setRequestProperty("charset", "utf-8")
-                connection.setRequestProperty("Accept", "application/json")
-
-                connection.useCaches = false
-
-                val writeDataOutputStream = DataOutputStream(connection.outputStream)
-                val jsonReq = JSONObject()
-                jsonReq.put("username", user)
-                jsonReq.put("password", password)
-
-                writeDataOutputStream.writeBytes(jsonReq.toString())
-                writeDataOutputStream.flush()
-                writeDataOutputStream.close()
-
-                val httpResult: Int = connection.responseCode
-                if(httpResult == HttpURLConnection.HTTP_OK)
-                {
-                    val inputStream = connection.inputStream
-                    val reader = BufferedReader(InputStreamReader(inputStream))
-                    val stringBuilder = StringBuilder()
-                    var line: String?
-                    try{
-                        while (reader.readLine().also { line = it } != null)
+            val intent = Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)
+            startActivity(intent)
+        } else {
+            Dexter.withActivity(this)
+                .withPermissions(
+                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                    android.Manifest.permission.ACCESS_COARSE_LOCATION
+                ).withListener( object: MultiplePermissionsListener {
+                    override fun onPermissionsChecked(report: MultiplePermissionsReport?) {
+                        if(report!!.areAllPermissionsGranted())
                         {
-                            stringBuilder.append(line + "\n")
+                            requestLocationData()
                         }
-                    } catch (e: IOException) {
-                        e.printStackTrace()
-                    } finally {
-                        try{
-                            inputStream.close()
-                        } catch (e: IOException)
+
+                        if(report!!.isAnyPermissionPermanentlyDenied)
                         {
-                            e.printStackTrace()
+                            Toast.makeText(this@MainActivity,
+                            "you have to denied location permission",
+                            Toast.LENGTH_LONG).show()
                         }
                     }
-                    result = stringBuilder.toString()
-                } else {
-                    result = connection.responseMessage
+
+                    override fun onPermissionRationaleShouldBeShown(
+                        p0: MutableList<PermissionRequest>?,
+                        p1: PermissionToken?
+                    ) {
+                        showRationalDialogForPermissions()
+                    }
+                }).onSameThread().check()
+        }
+    }
+
+    private fun showRationalDialogForPermissions() {
+        AlertDialog.Builder(this)
+            .setMessage("It looks like you have turned off permissions")
+            .setPositiveButton(
+                "GO TO SETTINGS"
+            ) {_, _ ->
+                try{
+                    val intent = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+                    val uri = Uri.fromParts("package", packageName, null)
+                    intent.data = uri
+                    startActivity(intent)
+                } catch (e: ActivityNotFoundException) {
+                    e.printStackTrace()
                 }
-            } catch (e: SocketTimeoutException) {
-                result = "Connection Timeout"
-            } catch (e: Exception) {
-                result = "Error : " + e.message
-            } finally {
-                connection?.disconnect()
             }
-            return result
-        }
+            .setNegativeButton("Cancel") {
+                dailog, _ -> dailog.dismiss()
+            }.show()
+    }
 
-        override fun onPostExecute(result: String?) {
-            super.onPostExecute(result)
-            cancelProgressDailog()
-            Log.i("JSON response", result!!)
+    @SuppressLint("MissingPermission")
+    private fun requestLocationData() {
+        val mLocationRequest = LocationRequest()
+        mLocationRequest.priority = LocationRequest.PRIORITY_HIGH_ACCURACY
 
-            val jsonObject = JSONObject(result)
-            val a = jsonObject.optString("a")
-        }
+        mFusedLocationProviderClient.requestLocationUpdates(mLocationRequest,
+            mLocationCallback, Looper.myLooper())
+    }
 
-        private fun showProgressDailog() {
-            customProgressDialog = Dialog(this@MainActivity)
-            customProgressDialog.setContentView(R.layout.dailog_custom_progress)
-            customProgressDialog.show()
-        }
+    private fun isLocationEnabled(): Boolean {
+        val locationManager: LocationManager =
+            getSystemService(Context.LOCATION_SERVICE) as LocationManager
+        return locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER) ||
+                locationManager.isProviderEnabled(LocationManager.NETWORK_PROVIDER)
+    }
 
-        private fun cancelProgressDailog() {
-            customProgressDialog.dismiss()
+    private val mLocationCallback = object : LocationCallback() {
+        override fun onLocationResult(locationResult: LocationResult) {
+            val mLastLocation: Location = locationResult.lastLocation
+            val latitude = mLastLocation.latitude
+            Log.i("Currentlatitude","$latitude")
+            val longitude = mLastLocation.longitude
+            Log.i("Currentlongitude","$longitude")
         }
     }
 }
